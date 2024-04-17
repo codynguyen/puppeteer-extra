@@ -6,6 +6,7 @@ import * as types from './types'
 
 import { RecaptchaContentScript } from './content'
 import { HcaptchaContentScript } from './content-hcaptcha'
+import { TurnstileContentScript } from './content-turnstile'
 import * as TwoCaptcha from './provider/2captcha'
 
 export const BuiltinSolutionProviders: types.SolutionProvider[] = [
@@ -71,6 +72,9 @@ export class PuppeteerExtraPluginRecaptcha extends PuppeteerExtraPlugin {
     if (vendor === 'hcaptcha') {
       scriptSource = HcaptchaContentScript.toString()
       scriptName = 'HcaptchaContentScript'
+    } else if (vendor === 'turnstile') {
+      scriptSource = TurnstileContentScript.toString()
+      scriptName = 'TurnstileContentScript'
     }
     // Some bundlers transform classes to anonymous classes that are assigned to
     // vars (e.g. esbuild). In such cases, `unexpected token '{'` errors are thrown
@@ -164,13 +168,34 @@ export class PuppeteerExtraPluginRecaptcha extends PuppeteerExtraPlugin {
       this.debug('wait:hasHcaptchaScriptTag - end', new Date()) // used as timer
     }
 
+    const hasTurnstileScriptTag = await page.$(
+      `script[src*="https://challenges.cloudflare.com/turnstile"]`
+    )
+    this.debug('hasTurnstileScriptTag', !!hasTurnstileScriptTag)
+    if (hasTurnstileScriptTag) {
+      this.debug('wait:hasTurnstileScriptTag - start', new Date())
+      await page.waitForFunction(
+        `
+        (function() {
+          return window.turnstile
+        })()
+      `,
+        { polling: 200, timeout: 10 * 1000 }
+      )
+      this.debug('wait:hasTurnstileScriptTag - end', new Date()) // used as timer
+    }
+
     const onDebugBindingCalled = (message: string, data: any) => {
       this.contentScriptDebug(message, data)
     }
 
     if (this.contentScriptDebug.enabled) {
       if ('exposeFunction' in page) {
-        await page.exposeFunction(this.debugBindingName, onDebugBindingCalled)
+        try {
+          await page.exposeFunction(this.debugBindingName, onDebugBindingCalled)
+        } catch (err) {
+          if (!err.message.match(/page binding.*already exists/)) throw err;
+        }
       }
     }
     // Even without a recaptcha script tag we're trying, just in case.
@@ -180,16 +205,18 @@ export class PuppeteerExtraPluginRecaptcha extends PuppeteerExtraPlugin {
     const resultHcaptcha: types.FindRecaptchasResult = (await page.evaluate(
       this._generateContentScript('hcaptcha', 'findRecaptchas')
     )) as any
-
+    const resultTurnstile: types.FindRecaptchasResult = (await page.evaluate(
+      this._generateContentScript('turnstile', 'findRecaptchas')
+    )) as any
     const filterResults = this._filterRecaptchas(resultRecaptcha.captchas)
     this.debug(
       `Filter results: ${filterResults.filtered.length} of ${filterResults.captchas.length} captchas filtered from results.`
     )
 
     const response: types.FindRecaptchasResult = {
-      captchas: [...filterResults.captchas, ...resultHcaptcha.captchas],
+      captchas: [...filterResults.captchas, ...resultHcaptcha.captchas, ...resultTurnstile.captchas],
       filtered: filterResults.filtered,
-      error: resultRecaptcha.error || resultHcaptcha.error
+      error: resultRecaptcha.error || resultHcaptcha.error || resultTurnstile.error
     }
     this.debug('findRecaptchas', response)
     if (this.opts.throwOnError && response.error) {
@@ -267,10 +294,18 @@ export class PuppeteerExtraPluginRecaptcha extends PuppeteerExtraPlugin {
           })
         )) as any)
       : { solved: [] }
+    const hasTurnstile = !!solutions.find(s => s._vendor === 'turnstile')
+    const solvedTurnstile: types.EnterRecaptchaSolutionsResult = hasTurnstile
+      ? ((await page.evaluate(
+          this._generateContentScript('turnstile', 'enterRecaptchaSolutions', {
+            solutions
+          })
+        )) as any)
+      : { solved: [] }
 
     const response: types.EnterRecaptchaSolutionsResult = {
-      solved: [...solvedRecaptcha.solved, ...solvedHcaptcha.solved],
-      error: solvedRecaptcha.error || solvedHcaptcha.error
+      solved: [...solvedRecaptcha.solved, ...solvedHcaptcha.solved, ...solvedTurnstile.solved],
+      error: solvedRecaptcha.error || solvedHcaptcha.error || solvedTurnstile.error
     }
     response.error = response.error || response.solved.find(s => !!s.error)
     this.debug('enterRecaptchaSolutions', response)

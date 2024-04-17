@@ -43,6 +43,8 @@ async function decodeRecaptchaAsync(
       let method = 'userrecaptcha'
       if (vendor === 'hcaptcha') {
         method = 'hcaptcha'
+      } else if (vendor === 'turnstile') {
+        method = 'turnstile'
       }
       solver.decodeReCaptcha(method, sitekey, url, extraData, opts, cb)
     } catch (error) {
@@ -89,12 +91,12 @@ async function getSolution(
     if (opts.useEnterpriseFlag && captcha.isEnterprise) {
       extraData['enterprise'] = 1
     }
-    
+
     if (process.env['2CAPTCHA_PROXY_TYPE'] && process.env['2CAPTCHA_PROXY_ADDRESS']) {
          extraData['proxytype'] = process.env['2CAPTCHA_PROXY_TYPE'].toUpperCase()
          extraData['proxy'] = process.env['2CAPTCHA_PROXY_ADDRESS']
     }
-      
+
     const { err, result, invalid } = await decodeRecaptchaAsync(
       token,
       captcha._vendor,

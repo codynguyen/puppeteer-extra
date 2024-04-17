@@ -56,7 +56,7 @@ export type SolveRecaptchasResult = FindRecaptchasResult &
   EnterRecaptchaSolutionsResult &
   GetSolutionsResult
 
-export type CaptchaVendor = 'recaptcha' | 'hcaptcha'
+export type CaptchaVendor = 'recaptcha' | 'hcaptcha' | 'turnstile'
 
 export type CaptchaType = 'checkbox' | 'invisible' | 'score'
 
